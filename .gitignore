@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Specific files
+secrets/
+
+*/cache
+cache
+scratch
+docs
+output
