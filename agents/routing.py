@@ -161,7 +161,7 @@ def _leg_query(return_leg: bool, route_type: str, weighted: bool = True) -> str:
            [n IN nodes(path) | elementId(n)] AS node_ids,
            [r IN relationships(path) | {{forward: elementId(startNode(r)) + '|' + elementId(endNode(r)), reverse: elementId(endNode(r)) + '|' + elementId(startNode(r))}}] AS road_pairs,
            [n IN nodes(path) | {{lat: n.lat, lon: n.lon, id: coalesce(n.id, elementId(n))}}] AS nodes_data,
-           [r IN relationships(path) | {{highway: r.highway, surface: r.surface, distance: r.distance, smoothness: r.smoothness, wheelchair: r.wheelchair, incline: r.incline, lit: r.lit}}] AS rels_data,
+           [r IN relationships(path) | {{highway: r.highway, surface: r.surface, distance: r.distance, smoothness: r.smoothness, wheelchair: r.wheelchair, incline: r.incline, lit: r.lit, geometry: r.geometry}}] AS rels_data,
            reduce(d = 0.0, r IN relationships(path) | d + coalesce(r.distance, 1.0)) AS distance,
            reduce(c = 0.0, r IN relationships(path) | c + coalesce(r.temp_cost, 1.0)) AS cost
     """

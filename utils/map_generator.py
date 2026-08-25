@@ -2,6 +2,7 @@
 # MAP GENERATOR FUNCTIONS
 # ---------------------------------------
 
+import json
 import folium
 from shapely.geometry import LineString
 
@@ -86,6 +87,34 @@ def _collect_coordinates_from_record(record):
     return coordinates
 
 
+def _collect_route_geometry(record):
+    """Expand stored OSM edge geometry while retaining endpoint fallback."""
+    if not isinstance(record, dict):
+        return []
+    nodes = record.get("path_nodes") or []
+    edges = record.get("edge_details") or []
+    coordinates = []
+    for index, node in enumerate(nodes):
+        node_coord = _extract_coordinates_from_node(node)
+        if node_coord and (not coordinates or coordinates[-1] != node_coord):
+            coordinates.append(node_coord)
+        if index >= len(edges):
+            continue
+        geometry = edges[index].get("geometry") if isinstance(edges[index], dict) else None
+        if not geometry:
+            continue
+        try:
+            geometry_points = json.loads(geometry) if isinstance(geometry, str) else geometry
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        for point in geometry_points:
+            if isinstance(point, (list, tuple)) and len(point) == 2:
+                coordinate = (float(point[0]), float(point[1]))
+                if not coordinates or coordinates[-1] != coordinate:
+                    coordinates.append(coordinate)
+    return coordinates
+
+
 def create_map_from_neo4j_output(
     neo4j_data,
     output_html="output/route_map.html",
@@ -101,8 +130,11 @@ def create_map_from_neo4j_output(
         return False
 
     coordinates = []
+    if isinstance(neo4j_data[0], dict):
+        coordinates = _collect_route_geometry(neo4j_data[0])
     for record in neo4j_data:
-        coordinates = _collect_coordinates_from_record(record)
+        if not coordinates:
+            coordinates = _collect_coordinates_from_record(record)
         if coordinates:
             break
 
