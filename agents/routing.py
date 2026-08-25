@@ -6,6 +6,7 @@ from typing import Any, List, Optional
 logger = logging.getLogger(__name__)
 
 UNPAVED_SURFACES = ["unpaved", "dirt", "gravel", "ground", "compacted"]
+PAVED_SURFACES = ["paved", "asphalt", "concrete", "paving_stones"]
 WALKING_HIGHWAYS = ["footway", "path", "pedestrian", "track", "bridleway"]
 FOREST_HIGHWAYS = ["path", "track", "bridleway"]
 
@@ -41,6 +42,8 @@ def build_preference_cost_expression(
 
     if env_prefs.get("prefer_green"):
         cost = f"CASE WHEN {green} THEN ({cost} * 0.45) ELSE ({cost} * 1.8) END"
+    if env_prefs.get("avoid_green"):
+        cost = f"CASE WHEN {green} THEN ({cost} * 4.0) ELSE ({cost}) END"
 
     preferred = []
     if env_prefs.get("prefer_forest"):
@@ -54,18 +57,36 @@ def build_preference_cost_expression(
     if preferred:
         cost = f"CASE WHEN ({' OR '.join(preferred)}) THEN ({cost} * 0.25) ELSE ({cost} * 3.0) END"
 
+    avoided = []
+    if env_prefs.get("avoid_forest"):
+        avoided.append(forest)
+    if env_prefs.get("avoid_park"):
+        avoided.append("coalesce(r.is_park, 'no') = 'yes'")
+    if env_prefs.get("avoid_nature_reserve"):
+        avoided.append("coalesce(r.is_nature_reserve, 'no') = 'yes'")
+    if env_prefs.get("avoid_open_green"):
+        avoided.append("coalesce(r.is_open_green, 'no') = 'yes'")
+    if avoided:
+        cost = f"CASE WHEN ({' OR '.join(avoided)}) THEN ({cost} * 4.0) ELSE ({cost}) END"
+
     if env_prefs.get("prefer_unpaved"):
         cost = f"CASE WHEN {unpaved} THEN ({cost} * 0.6) ELSE ({cost} * 1.4) END"
+    if env_prefs.get("prefer_paved"):
+        cost = f"CASE WHEN r.surface IN {PAVED_SURFACES} THEN ({cost} * 0.6) ELSE ({cost} * 1.8) END"
     if env_prefs.get("avoid_unpaved"):
         cost = f"CASE WHEN {unpaved} THEN ({cost} * 12.0) ELSE ({cost}) END"
     if env_prefs.get("prefer_footway_only"):
         cost = f"CASE WHEN r.highway IN {WALKING_HIGHWAYS} THEN ({cost} * 0.7) ELSE ({cost} * 2.5) END"
+    if env_prefs.get("avoid_footways"):
+        cost = f"CASE WHEN r.highway IN {WALKING_HIGHWAYS} THEN ({cost} * 4.0) ELSE ({cost}) END"
     if env_prefs.get("require_lit"):
         cost = f"CASE WHEN coalesce(r.lit, 'no') IN ['yes', 'true'] THEN ({cost} * 0.8) ELSE ({cost} * 2.0) END"
+    if env_prefs.get("avoid_lit"):
+        cost = f"CASE WHEN coalesce(r.lit, 'no') IN ['yes', 'true'] THEN ({cost} * 4.0) ELSE ({cost}) END"
     if env_prefs.get("prefer_easy"):
         cost = (
             f"CASE WHEN coalesce(r.smoothness, 'unknown') IN ['excellent', 'good', 'intermediate'] "
-            f"OR r.surface IN ['paved', 'asphalt', 'concrete', 'paving_stones'] "
+            f"OR r.surface IN {PAVED_SURFACES} "
             f"THEN ({cost} * 0.65) ELSE ({cost} * 2.2) END"
         )
     if env_prefs.get("require_wheelchair_accessible"):

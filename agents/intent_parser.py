@@ -14,11 +14,19 @@ class EnvironmentalPreferences(BaseModel):
     prefer_nature_reserve: bool = Field(default=False, description="True if user requests protected nature reserves.")
     prefer_open_green: bool = Field(default=False, description="True if user requests fields, meadows, or open greenery.")
     prefer_unpaved: bool = Field(default=False, description="True if user wants dirt, unpaved, gravel, or trail paths.")
+    prefer_paved: bool = Field(default=False, description="True if user wants paved or firm surfaces.")
     prefer_footway_only: bool = Field(default=False, description="True if user asks for footpaths only.")
     require_lit: bool = Field(default=False, description="True if user requests illuminated paths or night walking.")
     prefer_easy: bool = Field(default=False, description="True if user needs easy, accessible, low-effort paths.")
     require_wheelchair_accessible: bool = Field(default=False, description="True if the route must be suitable for wheelchair users.")
     avoid_unpaved: bool = Field(default=False, description="True if unpaved, loose, or rough surfaces should be avoided.")
+    avoid_green: bool = Field(default=False, description="True if green or nature areas should be avoided.")
+    avoid_forest: bool = Field(default=False, description="True if forested paths should be avoided.")
+    avoid_park: bool = Field(default=False, description="True if public parks should be avoided.")
+    avoid_nature_reserve: bool = Field(default=False, description="True if nature reserves should be avoided.")
+    avoid_open_green: bool = Field(default=False, description="True if fields and open green spaces should be avoided.")
+    avoid_footways: bool = Field(default=False, description="True if footways and paths should be avoided.")
+    avoid_lit: bool = Field(default=False, description="True if illuminated paths should be avoided.")
     avoid_stairs: bool = Field(default=False, description="True if stairs must be avoided.")
     avoid_steep: bool = Field(default=False, description="True if steep paths or steep inclines must be avoided.")
     avoid_mud: bool = Field(default=False, description="True if the user wants to avoid muddy paths or mud.")
@@ -60,6 +68,10 @@ def normalise_environmental_preferences(preferences: EnvironmentalPreferences, u
     explicit_park = "park" in request
     explicit_reserve = any(term in request for term in ("nature reserve", "protected reserve"))
     broad_green = any(term in request for term in broad_green_language)
+    explicit_unpaved_avoidance = any(
+        term in request
+        for term in ("avoid unpaved", "no unpaved", "without unpaved", "avoid gravel", "no gravel")
+    )
 
     if broad_green and not explicit_open_green:
         values.update({
@@ -106,6 +118,9 @@ def normalise_environmental_preferences(preferences: EnvironmentalPreferences, u
         values["avoid_steep"] = True
     if any(term in request for term in ("mud", "muddy", "muddy paths", "dirty shoes", "clean shoes")):
         values["avoid_mud"] = True
+        if not explicit_unpaved_avoidance:
+            values["avoid_unpaved"] = False
+            values["prefer_paved"] = False
 
     if values["require_wheelchair_accessible"]:
         values["prefer_easy"] = True
