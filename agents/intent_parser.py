@@ -49,88 +49,6 @@ def extract_json_block(text: str) -> str:
     return match.group(0) if match else text
 
 
-def normalise_environmental_preferences(preferences: EnvironmentalPreferences, user_request: str) -> dict:
-    values = preferences.model_dump()
-    request = user_request.lower()
-
-    broad_green_language = (
-        "green surroundings", "natural surroundings", "natural areas", "nature areas",
-        "nature everywhere", "as much nature as possible", "walk in green"
-    )
-    accessibility_language = (
-        "wheelchair", "wheel chair", "mobility scooter", "accessible", "pram",
-        "pushchair", "stroller", "reduced mobility"
-    )
-    easy_language = ("easy", "flat", "smooth", "low effort", "low-effort", "accessible")
-
-    explicit_open_green = any(term in request for term in ("open green", "meadow", "field"))
-    explicit_forest = any(term in request for term in ("forest", "woodland", "woods"))
-    explicit_park = "park" in request
-    explicit_reserve = any(term in request for term in ("nature reserve", "protected reserve"))
-    broad_green = any(term in request for term in broad_green_language)
-    explicit_unpaved_avoidance = any(
-        term in request
-        for term in ("avoid unpaved", "no unpaved", "without unpaved", "avoid gravel", "no gravel")
-    )
-
-    if broad_green and not explicit_open_green:
-        values.update({
-            "prefer_green": True,
-            "prefer_forest": True,
-            "prefer_park": True,
-            "prefer_nature_reserve": True,
-            "prefer_open_green": True,
-        })
-
-    # Specific categories are independent. For example, open green space does
-    # not imply forest, and a park request does not imply a nature reserve.
-    if explicit_open_green:
-        values["prefer_open_green"] = True
-        values["prefer_green"] = broad_green
-        if not explicit_forest:
-            values["prefer_forest"] = False
-        if not explicit_park:
-            values["prefer_park"] = False
-        if not explicit_reserve:
-            values["prefer_nature_reserve"] = False
-    if explicit_forest:
-        values["prefer_forest"] = True
-    if explicit_park:
-        values["prefer_park"] = True
-    if explicit_reserve:
-        values["prefer_nature_reserve"] = True
-
-    if any(term in request for term in accessibility_language):
-        values.update({
-            "prefer_easy": True,
-            "require_wheelchair_accessible": True,
-            "avoid_unpaved": True,
-            "avoid_stairs": True,
-            "avoid_steep": True,
-            "prefer_unpaved": False,
-        })
-
-    if any(term in request for term in easy_language):
-        values["prefer_easy"] = True
-    if any(term in request for term in ("no stairs", "without stairs", "stair-free")):
-        values["avoid_stairs"] = True
-    if any(term in request for term in ("no steep", "without steep", "flat route")):
-        values["avoid_steep"] = True
-    if any(term in request for term in ("mud", "muddy", "muddy paths", "dirty shoes", "clean shoes")):
-        values["avoid_mud"] = True
-        if not explicit_unpaved_avoidance:
-            values["avoid_unpaved"] = False
-            values["prefer_paved"] = False
-
-    if values["require_wheelchair_accessible"]:
-        values["prefer_easy"] = True
-        values["avoid_stairs"] = True
-        values["avoid_steep"] = True
-        values["avoid_unpaved"] = True
-        values["prefer_unpaved"] = False
-
-    return values
-
 @tool
 def user_location_tool() -> list:
     """
@@ -218,14 +136,31 @@ def intent_parser_node(state: dict) -> dict:
        - Example: "my home in Grobbendonk (Tulpstraat 12)" -> "Tulpstraat 12, Grobbendonk"
          - Set via_location_name only when the user explicitly says the route must pass through, visit,
             or include a location. It can be a city, landmark, address, or coordinate pair.
-        3. Reason about environmental preferences. Interpret context, not just exact words:
-             - Wheelchair, mobility scooter, pram, reduced mobility, or accessible means prefer_easy=true,
-                 require_wheelchair_accessible=true, avoid_unpaved=true, avoid_stairs=true, avoid_steep=true,
-                 and prefer_unpaved=false.
-             - Broad requests for green, nature, or natural surroundings mean prefer_green=true and also
-                 prefer_forest=true, prefer_park=true, prefer_nature_reserve=true, and prefer_open_green=true.
-             - Do not set prefer_unpaved for wheelchair or accessibility requests.
-        4. Keep preferences consistent. Accessibility requirements override a request for unpaved paths.
+                3. Reason carefully about every environmental preference. Set a field to true only when the request
+                     expresses that preference, requirement, or avoidance; otherwise leave it false.
+                     - Green: prefer_green is for a general request for nature or green surroundings. Use prefer_forest,
+                         prefer_park, prefer_nature_reserve, or prefer_open_green only when that specific setting is requested.
+                         Set avoid_green, avoid_forest, avoid_park, avoid_nature_reserve, or avoid_open_green when the user
+                         explicitly wants to stay away from the corresponding setting.
+                     - Surfaces: prefer_unpaved is for dirt, gravel, trails, or natural surfaces. prefer_paved is for paved,
+                         firm, smooth, or tarmac paths. avoid_unpaved is for an explicit request to avoid loose, rough,
+                         gravel, dirt, or unpaved surfaces.
+                     - Mud: set avoid_mud when the user mentions mud, muddy paths, dirty shoes, or keeping shoes clean.
+                         Do not infer avoid_unpaved or prefer_paved from avoid_mud; the weather agent decides that later.
+                     - Path type: set prefer_footway_only when the user wants footpaths only. Set avoid_footways when they
+                         explicitly want to avoid footways, paths, tracks, or pedestrian paths.
+                     - Lighting: require_lit is for illuminated routes or walking at night. avoid_lit is only for an explicit
+                         request to avoid illuminated paths.
+                     - Accessibility: wheelchair, mobility scooter, pram, reduced mobility, or an explicit accessibility
+                         requirement means require_wheelchair_accessible=true, prefer_easy=true, avoid_unpaved=true,
+                         avoid_stairs=true, avoid_steep=true, prefer_unpaved=false, and prefer_paved=true.
+                         Set prefer_easy for an easy, smooth, low-effort, or flat route. Set avoid_stairs and avoid_steep only
+                         when stairs or steep terrain must be avoided.
+                  4. Resolve conflicts deliberately. Explicit avoidance overrides a matching preference. In particular,
+                      avoid_green=true means prefer_green, prefer_forest, prefer_park, prefer_nature_reserve, and
+                      prefer_open_green must all be false. Likewise, avoiding a specific green category means its matching
+                      preference must be false. Accessibility requirements override any request for unpaved, stairs, or
+                      steep terrain. Do not invent preferences.
     """
 
     try:
@@ -301,9 +236,7 @@ def intent_parser_node(state: dict) -> dict:
         "via_point": final_via_point,
         "via_location_name": parsed_intent.via_location_name,
         "hike_date": parsed_intent.hike_date,
-        "environmental_preferences": normalise_environmental_preferences(
-            parsed_intent.environmental_preferences, user_request
-        ),
+        "environmental_preferences": parsed_intent.environmental_preferences.model_dump(),
         "notes": parsed_intent.notes or user_request
     }
 

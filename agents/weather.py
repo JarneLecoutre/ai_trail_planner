@@ -49,7 +49,7 @@ def weather_node(state: dict) -> dict:
     if assessment.avoid_unpaved and preferences.get("avoid_mud"):
         preferences["avoid_unpaved"] = True
         preferences["prefer_paved"] = True
-    if assessment.prefer_forest:
+    if assessment.prefer_forest and not preferences.get("avoid_green") and not preferences.get("avoid_forest"):
         preferences["prefer_forest"] = True
 
     enriched_request = dict(route_request)
