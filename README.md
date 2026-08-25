@@ -15,3 +15,5 @@ streamlit run app/app.py
 ```
 
 The app uses the Neo4j and Google settings from `.env`. It runs each trail request in a background worker, embeds the generated map, and shows the route intent extracted by the planner.
+
+The planner checks the forecast for the parsed hiking date and start position using the Open-Meteo API. Forecasts are available from today through 15 days ahead and do not require an API key. When the user asks to avoid mud and rain is forecast, the weather agent enriches the route preferences by avoiding unpaved paths.

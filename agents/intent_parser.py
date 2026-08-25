@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import date
 from typing import Optional, List
 from langchain_core.tools import tool
 from geopy.geocoders import Nominatim
@@ -20,14 +21,18 @@ class EnvironmentalPreferences(BaseModel):
     avoid_unpaved: bool = Field(default=False, description="True if unpaved, loose, or rough surfaces should be avoided.")
     avoid_stairs: bool = Field(default=False, description="True if stairs must be avoided.")
     avoid_steep: bool = Field(default=False, description="True if steep paths or steep inclines must be avoided.")
+    avoid_mud: bool = Field(default=False, description="True if the user wants to avoid muddy paths or mud.")
 
 class RouteIntent(BaseModel):
     route_type: str = Field(default="loop", description="'loop' or 'point_to_point'")
-    distance_km: float = Field(default=5.0, description="Target distance in kilometers")
+    distance_km: Optional[float] = Field(default=None, description="Target distance in kilometers, or null when the user does not specify one")
     start_location_name: Optional[str] = Field(default=None, description="Explicit start location text, address, or town name (e.g., 'Grobbendonk')")
     end_location_name: Optional[str] = Field(default=None, description="Explicit end location text, address, or town name (e.g., 'Nijlen')")
     start_point: Optional[List[float]] = Field(default=None, description="[latitude, longitude] or null")
     end_point: Optional[List[float]] = Field(default=None, description="[latitude, longitude] or null")
+    via_location_name: Optional[str] = Field(default=None, description="A place or address the route must pass through, if explicitly requested")
+    via_point: Optional[List[float]] = Field(default=None, description="[latitude, longitude] for a mandatory pass-through point, or null")
+    hike_date: Optional[str] = Field(default=None, description="Hiking date as YYYY-MM-DD; use today when explicitly requested and null when no day is specified")
     environmental_preferences: EnvironmentalPreferences = Field(default_factory=EnvironmentalPreferences)
     notes: str = Field(default="", description="Extra specifications about the intent")
 
@@ -99,6 +104,8 @@ def normalise_environmental_preferences(preferences: EnvironmentalPreferences, u
         values["avoid_stairs"] = True
     if any(term in request for term in ("no steep", "without steep", "flat route")):
         values["avoid_steep"] = True
+    if any(term in request for term in ("mud", "muddy", "muddy paths", "dirty shoes", "clean shoes")):
+        values["avoid_mud"] = True
 
     if values["require_wheelchair_accessible"]:
         values["prefer_easy"] = True
@@ -185,9 +192,17 @@ def intent_parser_node(state: dict) -> dict:
 
     Instructions:
     1. Identify route_type ("loop" or "point_to_point").
-    2. Extract clean, concise place/city/street names for 'start_location_name' and 'end_location_name' suitable for geocoding.
+         Extract distance_km as a positive number only when the user explicitly specifies a distance.
+         Return distance_km=null when no distance is stated; never use 0 or invent a default distance.
+            Extract hike_date as YYYY-MM-DD when the request says today, tomorrow, a weekday, or gives a date.
+             Resolve relative dates using today's date: {date.today().isoformat()}.
+            Return hike_date=null when no hiking day is mentioned.
+     2. Extract clean, concise place/city/street names for 'start_location_name', 'end_location_name', and
+         'via_location_name' suitable for geocoding.
        - Example: "city centre of Nijlen" -> "Nijlen"
        - Example: "my home in Grobbendonk (Tulpstraat 12)" -> "Tulpstraat 12, Grobbendonk"
+         - Set via_location_name only when the user explicitly says the route must pass through, visit,
+            or include a location. It can be a city, landmark, address, or coordinate pair.
         3. Reason about environmental preferences. Interpret context, not just exact words:
              - Wheelchair, mobility scooter, pram, reduced mobility, or accessible means prefer_easy=true,
                  require_wheelchair_accessible=true, avoid_unpaved=true, avoid_stairs=true, avoid_steep=true,
@@ -231,6 +246,16 @@ def intent_parser_node(state: dict) -> dict:
     elif parsed_intent.end_point:
         final_end_point = parsed_intent.end_point
 
+    # Resolve an explicitly requested mandatory pass-through point.
+    final_via_point = None
+    if parsed_intent.via_location_name:
+        print(f"[Intent Parser] Resolving pass-through location: '{parsed_intent.via_location_name}'")
+        final_via_point = resolve_location_tool.invoke(
+            {"location_description": parsed_intent.via_location_name}
+        )
+    elif parsed_intent.via_point:
+        final_via_point = parsed_intent.via_point
+
     route_type = parsed_intent.route_type.lower()
     if route_type not in ["loop", "point_to_point"]:
         route_type = "loop"
@@ -249,11 +274,18 @@ def intent_parser_node(state: dict) -> dict:
     if route_type == "loop" and not final_end_point:
         final_end_point = final_start_point
 
+    requested_distance = parsed_intent.distance_km
+    if requested_distance is not None and requested_distance <= 0:
+        requested_distance = None
+
     final_route_request = {
         "route_type": route_type,
-        "distance_km": float(parsed_intent.distance_km),
+        "distance_km": requested_distance,
         "start_point": final_start_point,
         "end_point": final_end_point,
+        "via_point": final_via_point,
+        "via_location_name": parsed_intent.via_location_name,
+        "hike_date": parsed_intent.hike_date,
         "environmental_preferences": normalise_environmental_preferences(
             parsed_intent.environmental_preferences, user_request
         ),

@@ -14,10 +14,11 @@ def validator_node(state: dict) -> dict:
         }
 
     route_type = state.get("route_request", {}).get("route_type", "loop")
+    via_point = state.get("route_request", {}).get("via_point")
     map_output_name = state.get("map_output_name", "route_map.html")
     map_output_path = state.get("map_output_path") or str(Path("output") / map_output_name)
     success = create_map_from_neo4j_output(
-        raw_data, map_output_path, route_type=route_type
+        raw_data, map_output_path, route_type=route_type, via_point=via_point
     )
     
     if not success:

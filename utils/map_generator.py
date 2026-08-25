@@ -86,7 +86,12 @@ def _collect_coordinates_from_record(record):
     return coordinates
 
 
-def create_map_from_neo4j_output(neo4j_data, output_html="output/route_map.html", route_type="loop"):
+def create_map_from_neo4j_output(
+    neo4j_data,
+    output_html="output/route_map.html",
+    route_type="loop",
+    via_point=None,
+):
     """
     Parses Neo4j query output into ordered coordinates and generates a Folium map.
     Supports both loop routes and point-to-point routes.
@@ -125,6 +130,13 @@ def create_map_from_neo4j_output(neo4j_data, output_html="output/route_map.html"
         opacity=0.75,
         tooltip="AI Trail Planner - Generated Route"
     ).add_to(m)
+
+    if via_point and len(via_point) == 2:
+        folium.Marker(
+            location=via_point,
+            popup="Mandatory pass-through location",
+            icon=folium.Icon(color="orange", icon="map-marker"),
+        ).add_to(m)
 
     folium.Marker(
         location=[start_lat, start_lon],

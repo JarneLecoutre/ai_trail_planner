@@ -12,6 +12,16 @@ def orchestrator_node(state: dict) -> dict:
         total_m = raw_route[0].get("totalDistance", 0) if isinstance(raw_route, list) and raw_route else 0
         actual_km = round(total_m / 1000, 2)
         requested_km = route_request.get("distance_km", state.get("distance_km", 5.0))
+        weather_report = state.get("weather_report")
+        weather_context = "No weather report was available."
+        if weather_report:
+            weather_context = (
+                f"Forecast for {weather_report['date']}: precipitation probability "
+                f"{weather_report['precipitation_probability']}%, rain "
+                f"{weather_report['rain_mm']} mm, showers {weather_report['showers_mm']} mm, "
+                f"snowfall {weather_report['snowfall_cm']} cm, maximum temperature "
+                f"{weather_report.get('temperature_max_c', 'unknown')} C."
+            )
 
         prompt = f"""
         Role: Professional Trail Guide Expert
@@ -19,8 +29,9 @@ def orchestrator_node(state: dict) -> dict:
         Requested route type: {route_type}
         Requested distance: {requested_km} km
         Actual calculated route distance: {actual_km} km
+        {weather_context}
 
-        Task: Write a short, engaging, and friendly English summary welcoming the hiker. Include the route type, estimated distance, and mention that the interactive map is generated and ready to open.
+        Task: Write a short, engaging, and friendly English summary welcoming the hiker. Include the route type, estimated distance, weather forecast, and mention that the interactive map is generated and ready to open.
         """
         ai_message = llm.invoke(prompt)
         return {"final_narrative": ai_message.content}
