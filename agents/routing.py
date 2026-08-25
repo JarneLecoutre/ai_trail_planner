@@ -171,6 +171,26 @@ def _format_route(first: dict, second: dict, via_id: Optional[str]) -> list:
     }]
 
 
+def _set_forbidden_edge_costs(graph_service: Any, forbidden_pairs: list[str], cost_expression: str) -> None:
+    execute_cypher_query(
+        graph_service,
+        """
+        MATCH ()-[r:CONNECTED_TO]->()
+        WHERE elementId(startNode(r)) + '|' + elementId(endNode(r)) IN $forbidden_pairs
+        SET r.temp_cost = 1000000000000.0
+        """,
+        {"forbidden_pairs": forbidden_pairs},
+    )
+
+
+def _restore_edge_costs(graph_service: Any, cost_expression: str) -> None:
+    execute_cypher_query(
+        graph_service,
+        f"MATCH ()-[r:CONNECTED_TO]->() SET r.temp_cost = {cost_expression}",
+        {},
+    )
+
+
 def routing_node(state: dict) -> dict:
     route_request = state.get("route_request") or {}
     route_type = route_request.get("route_type", "loop")
@@ -201,7 +221,33 @@ def routing_node(state: dict) -> dict:
     second_query = _leg_query(True, route_type)
     distance_tolerance = max(2.0, target_km * 0.25) if target_km is not None else None
 
-    for waypoint in waypoints or []:
+    if route_type == "point_to_point" and nodes["via_id"]:
+        first_result = execute_cypher_query(
+            graph_service,
+            first_query,
+            {"from_id": str(nodes["start_id"]), "to_id": str(nodes["via_id"])},
+        )
+        second_result = execute_cypher_query(
+            graph_service,
+            first_query,
+            {"from_id": str(nodes["via_id"]), "to_id": str(nodes["end_id"])},
+        )
+        if first_result and second_result:
+            first = first_result[0]
+            second = second_result[0]
+            distance_m = first.get("distance", 0) + second.get("distance", 0)
+            distance_km = distance_m / 1000.0
+            candidates.append({
+                "distance_difference": abs(distance_km - target_km) if target_km is not None else 0.0,
+                "preference_cost": (first.get("cost", 0) + second.get("cost", 0)) / max(distance_m, 1.0),
+                "distance_km": distance_km,
+                "route": _format_route(first, second, nodes["via_id"]),
+            })
+
+    loop_waypoints = [{"waypoint_id": nodes["via_id"]}] if route_type == "loop" and nodes["via_id"] else waypoints or []
+    for waypoint in loop_waypoints:
+        if route_type == "point_to_point" and nodes["via_id"]:
+            break
         waypoint_id = waypoint.get("waypoint_id")
         if not waypoint_id:
             continue
@@ -212,9 +258,8 @@ def routing_node(state: dict) -> dict:
         if not first_result:
             continue
         first = first_result[0]
+
         first_node_ids = first.get("node_ids", [])
-        if nodes["via_id"] and str(nodes["via_id"]) not in {str(node_id) for node_id in first_node_ids}:
-            continue
         first_distance = first.get("distance", 0)
         if target_km is not None and first_distance > (target_km + distance_tolerance) * 1000:
             continue
@@ -230,24 +275,12 @@ def routing_node(state: dict) -> dict:
             "allow_overlap": False,
         }
         if route_type == "loop":
-            execute_cypher_query(
-                graph_service,
-                """
-                MATCH ()-[r:CONNECTED_TO]->()
-                WHERE elementId(startNode(r)) + '|' + elementId(endNode(r)) IN $forbidden_pairs
-                SET r.temp_cost = 1000000000000.0
-                """,
-                {"forbidden_pairs": forbidden_pairs},
-            )
+            _set_forbidden_edge_costs(graph_service, forbidden_pairs, cost_expression)
         try:
             second_result = execute_cypher_query(graph_service, second_query, second_params)
         finally:
             if route_type == "loop":
-                execute_cypher_query(
-                    graph_service,
-                    f"MATCH ()-[r:CONNECTED_TO]->() SET r.temp_cost = {cost_expression}",
-                    {},
-                )
+                _restore_edge_costs(graph_service, cost_expression)
         if not second_result and route_type == "point_to_point" and nodes["via_id"]:
             second_params["allow_overlap"] = True
             second_result = execute_cypher_query(graph_service, second_query, second_params)
