@@ -6,7 +6,6 @@ def orchestrator_node(state: dict) -> dict:
         llm = state["_llm"]
         route_request = state.get("route_request") or {}
         route_type = route_request.get("route_type", "loop")
-        map_output_name = state.get("map_output_name", "route_map.html")
 
         raw_route = state.get("raw_route_data") or [{}]
         total_m = raw_route[0].get("totalDistance", 0) if isinstance(raw_route, list) and raw_route else 0
@@ -25,13 +24,12 @@ def orchestrator_node(state: dict) -> dict:
 
         prompt = f"""
         Role: Professional Trail Guide Expert
-        Context: The route map has been successfully computed and saved to 'output/{map_output_name}'.
         Requested route type: {route_type}
         Requested distance: {requested_km} km
         Actual calculated route distance: {actual_km} km
         {weather_context}
 
-        Task: Write a short, engaging, and friendly English summary welcoming the hiker. Include the route type, estimated distance, weather forecast, and mention that the interactive map is generated and ready to open.
+        Task: Write a short, engaging, and friendly English summary welcoming the hiker. Include the route type, estimated distance, and weather forecast.
         """
         ai_message = llm.invoke(prompt)
         return {"final_narrative": ai_message.content}
