@@ -1,5 +1,42 @@
 from typing import Any
 
+
+UNPAVED_SURFACES = {"unpaved", "dirt", "gravel", "ground", "compacted"}
+PAVED_SURFACES = {"paved", "asphalt", "concrete", "paving_stones"}
+GREEN_HIGHWAYS = {"path", "track", "bridleway"}
+
+
+def _is_yes(value: Any) -> bool:
+    return value is True or str(value).lower() in {"yes", "true"}
+
+
+def _route_surface_totals(raw_route: list) -> dict[str, float]:
+    edges = raw_route[0].get("edge_details", []) if raw_route else []
+    totals = {"paved": 0.0, "unpaved": 0.0, "green": 0.0}
+
+    for edge in edges:
+        distance_m = float(edge.get("distance") or 0)
+        surface = str(edge.get("surface") or "").lower()
+        is_unpaved = _is_yes(edge.get("is_unpaved")) or surface in UNPAVED_SURFACES
+        is_green = (
+            _is_yes(edge.get("is_green"))
+            or _is_yes(edge.get("is_forest"))
+            or _is_yes(edge.get("is_park"))
+            or _is_yes(edge.get("is_nature_reserve"))
+            or _is_yes(edge.get("is_open_green"))
+            or str(edge.get("highway") or "").lower() in GREEN_HIGHWAYS
+        )
+
+        if is_unpaved:
+            totals["unpaved"] += distance_m
+        elif surface in PAVED_SURFACES:
+            totals["paved"] += distance_m
+        if is_green:
+            totals["green"] += distance_m
+
+    return {name: round(distance / 1000, 2) for name, distance in totals.items()}
+
+
 def orchestrator_node(state: dict) -> dict:
     if state.get("is_valid"):
         print("[Orchestrator Node] Route structure passed validation. Compiling user summary...")
@@ -10,6 +47,7 @@ def orchestrator_node(state: dict) -> dict:
         raw_route = state.get("raw_route_data") or [{}]
         total_m = raw_route[0].get("totalDistance", 0) if isinstance(raw_route, list) and raw_route else 0
         actual_km = round(total_m / 1000, 2)
+        surface_totals = _route_surface_totals(raw_route)
         requested_km = route_request.get("distance_km", state.get("distance_km", 5.0))
         weather_report = state.get("weather_report")
         weather_context = "No weather report was available."
@@ -27,9 +65,12 @@ def orchestrator_node(state: dict) -> dict:
         Requested route type: {route_type}
         Requested distance: {requested_km} km
         Actual calculated route distance: {actual_km} km
+        Paved distance: {surface_totals['paved']} km
+        Unpaved distance: {surface_totals['unpaved']} km
+        Green distance: {surface_totals['green']} km
         {weather_context}
 
-        Task: Write a short, engaging, and friendly English summary welcoming the hiker. Include the route type, estimated distance, and weather forecast.
+        Task: Write a short, engaging, and friendly English summary welcoming the hiker. Include the route type, estimated distance, weather forecast, and the paved, unpaved, and green distance totals.
         """
         ai_message = llm.invoke(prompt)
         return {"final_narrative": ai_message.content}

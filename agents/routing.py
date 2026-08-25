@@ -26,8 +26,6 @@ def build_preference_cost_expression(
     cost = "coalesce(r.distance, 1.0)"
     forest = (
         "(coalesce(r.is_forest, 'no') = 'yes' "
-        "OR coalesce(r.landuse, '') IN ['forest', 'orchard'] "
-        "OR coalesce(r.natural, '') IN ['wood', 'scrub', 'heath'] "
         f"OR r.highway IN {FOREST_HIGHWAYS})"
     )
     green = (
@@ -132,11 +130,12 @@ def _waypoint_query(route_type: str) -> str:
     """
 
 
-def _leg_query(return_leg: bool, route_type: str, weighted: bool = True) -> str:
+def _leg_query(return_leg: bool, route_type: str) -> str:
     overlap_filter = ""
     road_filter = ""
     if return_leg and route_type == "loop":
         road_filter = """
+        WITH path
         WHERE ALL(rel IN relationships(path)
             WHERE NOT (elementId(startNode(rel)) + '|' + elementId(endNode(rel)) IN $forbidden_pairs
                 OR elementId(endNode(rel)) + '|' + elementId(startNode(rel)) IN $forbidden_pairs))
@@ -146,22 +145,17 @@ def _leg_query(return_leg: bool, route_type: str, weighted: bool = True) -> str:
         WITH path, [n IN nodes(path) | elementId(n)] AS node_ids
         WHERE $allow_overlap OR NONE(id IN node_ids[..-1] WHERE id IN $forbidden_nodes)
         """
-    path_match = (
-        "CALL apoc.algo.dijkstra(a, b, 'CONNECTED_TO', 'temp_cost') YIELD path"
-        if weighted else
-        "MATCH path = shortestPath((a)-[:CONNECTED_TO*..100]->(b))"
-    )
     return f"""
     MATCH (a:OSMNode), (b:OSMNode)
     WHERE elementId(a) = $from_id AND elementId(b) = $to_id
-    {path_match}
+    CALL apoc.algo.dijkstra(a, b, 'CONNECTED_TO', 'temp_cost') YIELD path
     {overlap_filter}
     {road_filter}
     RETURN path,
            [n IN nodes(path) | elementId(n)] AS node_ids,
            [r IN relationships(path) | {{forward: elementId(startNode(r)) + '|' + elementId(endNode(r)), reverse: elementId(endNode(r)) + '|' + elementId(startNode(r))}}] AS road_pairs,
            [n IN nodes(path) | {{lat: n.lat, lon: n.lon, id: coalesce(n.id, elementId(n))}}] AS nodes_data,
-           [r IN relationships(path) | {{highway: r.highway, surface: r.surface, distance: r.distance, smoothness: r.smoothness, wheelchair: r.wheelchair, incline: r.incline, lit: r.lit, geometry: r.geometry}}] AS rels_data,
+           [r IN relationships(path) | {{highway: r.highway, surface: r.surface, distance: r.distance, is_unpaved: r.is_unpaved, is_green: r.is_green, is_forest: r.is_forest, is_park: r.is_park, is_nature_reserve: r.is_nature_reserve, is_open_green: r.is_open_green, smoothness: r.smoothness, wheelchair: r.wheelchair, incline: r.incline, lit: r.lit, geometry: r.geometry}}] AS rels_data,
            reduce(d = 0.0, r IN relationships(path) | d + coalesce(r.distance, 1.0)) AS distance,
            reduce(c = 0.0, r IN relationships(path) | c + coalesce(r.temp_cost, 1.0)) AS cost
     """
@@ -169,10 +163,10 @@ def _leg_query(return_leg: bool, route_type: str, weighted: bool = True) -> str:
 
 def _format_route(first: dict, second: dict, via_id: Optional[str]) -> list:
     return [{
-        "path_nodes": first["nodes_data"] + second["nodes_data"][1:],
-        "edge_details": first["rels_data"] + second["rels_data"],
-        "totalDistance": first["distance"] + second["distance"],
-        "totalCost": first["cost"] + second["cost"],
+        "path_nodes": first.get("nodes_data", []) + second.get("nodes_data", [])[1:],
+        "edge_details": first.get("rels_data", []) + second.get("rels_data", []),
+        "totalDistance": first.get("distance", 0) + second.get("distance", 0),
+        "totalCost": first.get("cost", 0) + second.get("cost", 0),
         "via_node_id": via_id,
     }]
 
@@ -208,16 +202,21 @@ def routing_node(state: dict) -> dict:
     distance_tolerance = max(2.0, target_km * 0.25) if target_km is not None else None
 
     for waypoint in waypoints or []:
-        waypoint_id = str(waypoint["waypoint_id"])
+        waypoint_id = waypoint.get("waypoint_id")
+        if not waypoint_id:
+            continue
+        waypoint_id = str(waypoint_id)
         first_result = execute_cypher_query(
             graph_service, first_query, {"from_id": str(nodes["start_id"]), "to_id": waypoint_id}
         )
         if not first_result:
             continue
         first = first_result[0]
-        if nodes["via_id"] and str(nodes["via_id"]) not in {str(node_id) for node_id in first["node_ids"]}:
+        first_node_ids = first.get("node_ids", [])
+        if nodes["via_id"] and str(nodes["via_id"]) not in {str(node_id) for node_id in first_node_ids}:
             continue
-        if target_km is not None and first["distance"] > (target_km + distance_tolerance) * 1000:
+        first_distance = first.get("distance", 0)
+        if target_km is not None and first_distance > (target_km + distance_tolerance) * 1000:
             continue
 
         forbidden_pairs = []
@@ -226,17 +225,29 @@ def routing_node(state: dict) -> dict:
         second_params = {
             "from_id": waypoint_id,
             "to_id": str(nodes["end_id"]),
-            "forbidden_nodes": first["node_ids"][:-1],
+            "forbidden_nodes": first_node_ids[:-1],
             "forbidden_pairs": forbidden_pairs,
             "allow_overlap": False,
         }
-        second_result = execute_cypher_query(graph_service, second_query, second_params)
-        if not second_result and route_type == "loop":
-            second_result = execute_cypher_query(
+        if route_type == "loop":
+            execute_cypher_query(
                 graph_service,
-                _leg_query(True, route_type, weighted=False),
-                second_params,
+                """
+                MATCH ()-[r:CONNECTED_TO]->()
+                WHERE elementId(startNode(r)) + '|' + elementId(endNode(r)) IN $forbidden_pairs
+                SET r.temp_cost = 1000000000000.0
+                """,
+                {"forbidden_pairs": forbidden_pairs},
             )
+        try:
+            second_result = execute_cypher_query(graph_service, second_query, second_params)
+        finally:
+            if route_type == "loop":
+                execute_cypher_query(
+                    graph_service,
+                    f"MATCH ()-[r:CONNECTED_TO]->() SET r.temp_cost = {cost_expression}",
+                    {},
+                )
         if not second_result and route_type == "point_to_point" and nodes["via_id"]:
             second_params["allow_overlap"] = True
             second_result = execute_cypher_query(graph_service, second_query, second_params)
@@ -244,10 +255,10 @@ def routing_node(state: dict) -> dict:
             continue
 
         second = second_result[0]
-        distance_m = first["distance"] + second["distance"]
+        distance_m = first_distance + second.get("distance", 0)
         distance_km = distance_m / 1000.0
         distance_difference = abs(distance_km - target_km) if target_km is not None else 0.0
-        preference_cost = (first["cost"] + second["cost"]) / max(distance_m, 1.0)
+        preference_cost = (first.get("cost", 0) + second.get("cost", 0)) / max(distance_m, 1.0)
         candidates.append({
             "distance_difference": distance_difference,
             "preference_cost": preference_cost,

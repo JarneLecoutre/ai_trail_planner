@@ -79,9 +79,12 @@ class Neo4jService:
         )
 
         if result:
-            closest_dist = round(result[0]["dist"], 2)
-            print(f"Success: Closest OSMNode found at {closest_dist} meters from current location.")
-            return result[0]["nodeId"]
+            closest_node = result[0]
+            node_id = closest_node.get("nodeId")
+            if node_id:
+                closest_dist = round(closest_node.get("dist", 0), 2)
+                print(f"Success: Closest OSMNode found at {closest_dist} meters from current location.")
+                return node_id
 
         print("Warning: No close OSMNode found matching the criteria.")
         return None     
