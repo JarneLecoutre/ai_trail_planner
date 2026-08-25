@@ -13,6 +13,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from app.app_utils import OUTPUT_DIR, map_path, run_planner
+from utils.gpx_generator import extract_coordinates_for_gpx, generate_gpx
 
 
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -194,6 +195,22 @@ if result:
         st.markdown('<div class="section-kicker">Trail notes</div>', unsafe_allow_html=True)
         if result.get("final_narrative"):
             st.write(result["final_narrative"])
+        route_coordinates = extract_coordinates_for_gpx(raw_route)
+        if len(route_coordinates) >= 2:
+            gpx_data = generate_gpx(
+                route_coordinates,
+                route_name="AI Trail Planner Route",
+                route_description=st.session_state.get("planner_request", ""),
+                distance_km=actual_km,
+            )
+            st.download_button(
+                "Download GPX",
+                data=gpx_data,
+                file_name="ai-trail-planner-route.gpx",
+                mime="application/gpx+xml",
+            )
+        else:
+            st.warning("GPX download is unavailable because the route has too few coordinates.")
         st.markdown('<div class="section-kicker">What to wear</div>', unsafe_allow_html=True)
         advice = weather.get("clothing_advice")
         if advice:
