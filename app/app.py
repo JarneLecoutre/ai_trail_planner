@@ -113,6 +113,9 @@ def show_map(path):
     components.html(path.read_text(encoding="utf-8"), height=650, scrolling=False)
 
 
+future: Future | None = st.session_state.get("planner_future")
+is_planning = future is not None and not future.done()
+
 prompt_column, _ = st.columns([1.35, .65])
 with prompt_column:
     st.markdown('<div class="prompt-label">Your trail brief</div>', unsafe_allow_html=True)
@@ -124,13 +127,16 @@ with prompt_column:
             "Create a 10 km loop from Grobbendonk through open green spaces."
         ),
     )
-    plan_clicked = st.button("Plan my trail", type="primary")
+    plan_clicked = st.button("Plan my trail", type="primary", disabled=is_planning)
 
 if plan_clicked:
     request = user_request.strip()
     if not request:
         st.warning("Please describe the trail you want before planning it.")
         st.stop()
+
+    for key in ("planner_future", "planner_request", "planner_map_name", "planner_result", "planner_error"):
+        st.session_state.pop(key, None)
 
     map_name = f"streamlit_trail_{uuid.uuid4().hex}.html"
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -147,23 +153,25 @@ if plan_clicked:
     )
     st.session_state["planner_request"] = request
     st.session_state["planner_map_name"] = map_name
-    st.session_state.pop("planner_result", None)
-    st.session_state.pop("planner_error", None)
-
-future: Future | None = st.session_state.get("planner_future")
-if future is not None and not future.done():
-    st.info("The trail planner is working in the background. This page will update when it is finished.")
-    time.sleep(0.5)
     st.rerun()
 
-if future is not None and future.done() and "planner_result" not in st.session_state and "planner_error" not in st.session_state:
+if future is not None and not future.done():
+    with st.spinner("Planning your trail..."):
+        time.sleep(0.5)
+        st.rerun()
+
+if future is not None and future.done():
     try:
         st.session_state["planner_result"] = future.result()
+        st.session_state.pop("planner_error", None)
     except Exception as error:
+        st.session_state.pop("planner_result", None)
         st.session_state["planner_error"] = str(error)
+    st.session_state.pop("planner_future", None)
+    st.rerun()
 
-if st.session_state.get("planner_error"):
-    st.error("The trail planner could not complete: " + st.session_state["planner_error"])
+if not is_planning and st.session_state.get("planner_error"):
+    print("[Planner] The trail planner could not complete: " + st.session_state["planner_error"])
 
 result = st.session_state.get("planner_result")
 if result:
