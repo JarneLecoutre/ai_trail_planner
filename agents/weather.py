@@ -1,6 +1,15 @@
 from datetime import date
 
-from services.weather_service import get_forecast
+from pydantic import BaseModel, Field
+
+from services.weather_service import weather_lookup_tool
+
+
+class WeatherAssessment(BaseModel):
+    clothing_advice: list[str] = Field(description="Specific practical clothing and gear advice based on this forecast")
+    route_guidance: str = Field(description="Brief explanation of how this forecast should influence the hike")
+    avoid_unpaved: bool = Field(description="Whether the forecast makes unpaved paths undesirable")
+    prefer_forest: bool = Field(description="Whether the forecast makes forest cover preferable")
 
 
 def weather_node(state: dict) -> dict:
@@ -12,16 +21,38 @@ def weather_node(state: dict) -> dict:
 
     forecast_date = route_request.get("hike_date") or date.today().isoformat()
     try:
-        report = get_forecast(start_point[0], start_point[1], forecast_date)
+        report = weather_lookup_tool.invoke({
+            "latitude": start_point[0],
+            "longitude": start_point[1],
+            "forecast_date": forecast_date,
+        })
     except Exception as error:
         print(f"[Weather Agent] Forecast unavailable: {error}")
         return {"weather_report": None, "weather_error": str(error)}
 
-    wet = report["rain_mm"] > 0 or report["showers_mm"] > 0
+    llm = state.get("_llm")
+    assessment_prompt = f"""
+    You are an experienced hiking guide. Reason about this structured weather forecast
+    and produce practical advice for the hiker. Do not use fixed temperature thresholds
+    or generic rules; consider all available conditions together, including temperature,
+    rain, precipitation probability, showers, snowfall, and wind.
+
+    Weather data:
+    {report}
+
+    Decide whether wet ground makes unpaved paths undesirable and whether forest cover
+    would improve comfort. Explain the reasoning briefly in route_guidance. Clothing
+    advice should be concise, specific, and useful for this exact forecast.
+    """
+    assessment = llm.with_structured_output(WeatherAssessment).invoke(assessment_prompt)
     preferences = dict(route_request.get("environmental_preferences") or {})
-    if wet and preferences.get("avoid_mud"):
+    if assessment.avoid_unpaved and preferences.get("avoid_mud"):
         preferences["avoid_unpaved"] = True
+    if assessment.prefer_forest:
+        preferences["prefer_forest"] = True
 
     enriched_request = dict(route_request)
     enriched_request["environmental_preferences"] = preferences
+    report["clothing_advice"] = assessment.clothing_advice
+    report["route_guidance"] = assessment.route_guidance
     return {"route_request": enriched_request, "weather_report": report, "weather_error": None}

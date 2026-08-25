@@ -36,6 +36,8 @@ st.markdown(
         --clay: #c77d55;
         --paper: #f6f4ee;
         --line: #dce2d8;
+        --sun: #e8ad45;
+        --sky: #e5f0ef;
     }
     .stApp {
         background: var(--paper);
@@ -53,7 +55,7 @@ st.markdown(
     }
     [data-testid='stHeader'] { background: transparent; }
     [data-testid='stAppViewContainer'] { background: transparent; }
-    .block-container { max-width: 1180px; padding-top: 3.5rem; padding-bottom: 4rem; }
+    .block-container { max-width: 1220px; padding-top: 2.4rem; padding-bottom: 4rem; }
     .eyebrow {
         color: var(--clay); font-size: .74rem; font-weight: 700;
         letter-spacing: .12em; text-transform: uppercase; margin-bottom: .65rem;
@@ -61,10 +63,15 @@ st.markdown(
     .hero-title {
         color: var(--moss-dark); font-family: 'Newsreader', Georgia, serif;
         font-size: clamp(2.7rem, 5vw, 5.4rem); line-height: .95;
-        margin: 0; max-width: 680px;
+        margin: 0; max-width: 760px;
     }
-    .hero-copy { color: var(--muted); font-size: 1.05rem; line-height: 1.6; max-width: 560px; margin-top: 1rem; }
-    .prompt-label { color: var(--ink); font-size: .86rem; font-weight: 700; margin: 2.4rem 0 .35rem; }
+    .hero-copy { color: var(--muted); font-size: 1.05rem; line-height: 1.6; max-width: 620px; margin-top: 1rem; }
+    .prompt-label { color: var(--ink); font-size: .86rem; font-weight: 700; margin: 2rem 0 .35rem; }
+    .section-kicker { color: var(--clay); font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; margin-bottom: .35rem; }
+    .weather-strip { background: var(--sky); border-left: 4px solid var(--sun); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+    .weather-strip strong { color: var(--moss-dark); }
+    .advice-list { background: rgba(255,255,255,.68); border: 1px solid var(--line); padding: 1rem 1.2rem; }
+    .advice-item { color: var(--ink); line-height: 1.45; margin: .55rem 0; }
     div[data-testid='stTextArea'] textarea {
         background: rgba(255,255,255,.78); border: 1px solid var(--line);
         border-radius: 10px; color: var(--ink); font-size: 1rem; line-height: 1.55;
@@ -78,6 +85,7 @@ st.markdown(
     }
     div.stButton > button:hover { background: var(--moss-dark); transform: translateY(-1px); }
     .result-heading { border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1.5rem; }
+    div[data-testid='stMetric'] { background: rgba(255,255,255,.6); border: 1px solid var(--line); padding: .8rem; }
     h2, h3 { color: var(--moss-dark); font-family: 'Newsreader', Georgia, serif; }
     [data-testid='stAlert'] { border-radius: 7px; }
     @media (max-width: 700px) {
@@ -160,15 +168,35 @@ result = st.session_state.get("planner_result")
 if result:
     route_request = result.get("route_request") or {}
     st.markdown('<div class="result-heading"></div>', unsafe_allow_html=True)
-    st.success("Trail created.")
-    left, right = st.columns([2, 1])
+    st.success("Trail created and ready to explore.")
+    weather = result.get("weather_report") or {}
+    raw_route = result.get("raw_route_data") or [{}]
+    actual_km = (raw_route[0].get("totalDistance", 0) or 0) / 1000
+    st.markdown('<div class="section-kicker">Your trail brief</div>', unsafe_allow_html=True)
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Route", route_request.get("route_type", "loop").replace("_", " ").title())
+    metric_columns[1].metric("Distance", f"{actual_km:.1f} km")
+    metric_columns[2].metric("Forecast", str(weather.get("date", "Unavailable")))
+    metric_columns[3].metric("High", f"{weather.get('temperature_max_c', '--')} C")
+    if weather:
+        st.markdown(
+            f'<div class="weather-strip"><strong>Trail conditions</strong><br>'
+            f'Rain: {weather.get("rain_mm", 0)} mm · Chance: {weather.get("precipitation_probability", "--")}% · '
+            f'Wind: {weather.get("wind_speed_max_kmh", "--")} km/h</div>',
+            unsafe_allow_html=True,
+        )
+        if weather.get("route_guidance"):
+            st.info(weather["route_guidance"])
+    left, right = st.columns([1.7, 1])
     with left:
         show_map(map_path(st.session_state["planner_map_name"]))
     with right:
-        st.subheader("Planner summary")
+        st.markdown('<div class="section-kicker">Trail notes</div>', unsafe_allow_html=True)
         if result.get("final_narrative"):
             st.write(result["final_narrative"])
-        st.subheader("What it understood")
-        st.json(route_request)
-        st.caption("Request sent to the planner")
-        st.write(st.session_state.get("planner_request", ""))
+        st.markdown('<div class="section-kicker">What to wear</div>', unsafe_allow_html=True)
+        advice = weather.get("clothing_advice")
+        if advice:
+            st.markdown('<div class="advice-list">' + ''.join(f'<div class="advice-item">• {item}</div>' for item in advice) + '</div>', unsafe_allow_html=True)
+        with st.expander("Show route details"):
+            st.json(route_request)

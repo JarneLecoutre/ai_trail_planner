@@ -77,9 +77,6 @@ def build_preference_cost_expression(
     if env_prefs.get("avoid_steep"):
         cost = f"CASE WHEN coalesce(r.incline, '') IN ['up', 'down', '10%', '15%', '20%', '25%'] THEN ({cost} * 5.0) ELSE ({cost}) END"
 
-    temperature = weather_report.get("temperature_max_c") if weather_report else None
-    if temperature is not None and temperature >= 24:
-        cost = f"CASE WHEN {forest} THEN ({cost} * 0.65) ELSE ({cost} * 1.15) END"
     return cost
 
 
