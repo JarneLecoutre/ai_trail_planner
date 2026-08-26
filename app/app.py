@@ -1,3 +1,5 @@
+"""Streamlit UI for the AI Trail Planner."""
+
 import sys
 import time
 import uuid
@@ -107,6 +109,7 @@ st.markdown(
 
 
 def show_map(path):
+    """Render a generated HTML map file inside the Streamlit page."""
     if not path.exists():
         st.warning("The route was accepted, but the map file was not found.")
         return

@@ -1,9 +1,8 @@
+"""Routing node that generates weighted candidate trails from Neo4j graph data."""
+
 import logging
 import random
 from typing import Any, List, Optional
-
-
-logger = logging.getLogger(__name__)
 
 UNPAVED_SURFACES = ["unpaved", "dirt", "gravel", "ground", "compacted"]
 PAVED_SURFACES = ["paved", "asphalt", "concrete", "paving_stones"]
@@ -12,6 +11,7 @@ FOREST_HIGHWAYS = ["path", "track", "bridleway"]
 
 
 def execute_cypher_query(graph_service: Any, query: str, params: dict) -> List[dict]:
+    """Execute a Cypher query against whichever graph interface is available."""
     if hasattr(graph_service, "graph") and hasattr(graph_service.graph, "query"):
         return graph_service.graph.query(query, params)
     if hasattr(graph_service, "query"):
@@ -21,9 +21,8 @@ def execute_cypher_query(graph_service: Any, query: str, params: dict) -> List[d
     raise AttributeError("Could not find a valid execution query method on 'graph_service'.")
 
 
-def build_preference_cost_expression(
-    env_prefs: dict, weather_report: Optional[dict] = None
-) -> str:
+def build_preference_cost_expression(env_prefs: dict) -> str:
+    """Build a Cypher cost expression from parsed environmental preferences."""
     cost = "coalesce(r.distance, 1.0)"
     forest = (
         "(coalesce(r.is_forest, 'no') = 'yes' "
@@ -100,6 +99,7 @@ def build_preference_cost_expression(
 
 
 def _resolve_nodes(graph_service: Any, route_request: dict, state: dict) -> Optional[dict]:
+    """Resolve nearest graph node ids for start, end, and optional via coordinates."""
     start_point = route_request.get("start_point")
     if not start_point:
         return None
@@ -120,6 +120,7 @@ def _resolve_nodes(graph_service: Any, route_request: dict, state: dict) -> Opti
 
 
 def _waypoint_query(route_type: str) -> str:
+    """Return a waypoint candidate query tuned for loop or point-to-point mode."""
     if route_type == "loop":
         return """
         MATCH (s:OSMNode), (w:OSMNode)
@@ -152,6 +153,7 @@ def _waypoint_query(route_type: str) -> str:
 
 
 def _leg_query(return_leg: bool, route_type: str) -> str:
+    """Return a shortest-path query for one route leg with overlap controls."""
     overlap_filter = ""
     road_filter = ""
     if return_leg and route_type == "loop":
@@ -183,6 +185,7 @@ def _leg_query(return_leg: bool, route_type: str) -> str:
 
 
 def _format_route(first: dict, second: dict, via_id: Optional[str]) -> list:
+    """Merge two path legs into the route payload consumed by downstream nodes."""
     return [{
         "path_nodes": first.get("nodes_data", []) + second.get("nodes_data", [])[1:],
         "edge_details": first.get("rels_data", []) + second.get("rels_data", []),
@@ -193,6 +196,7 @@ def _format_route(first: dict, second: dict, via_id: Optional[str]) -> list:
 
 
 def _set_forbidden_edge_costs(graph_service: Any, forbidden_pairs: list[str], cost_expression: str) -> None:
+    """Temporarily penalize already-used directed edges to force path diversity."""
     execute_cypher_query(
         graph_service,
         """
@@ -205,6 +209,7 @@ def _set_forbidden_edge_costs(graph_service: Any, forbidden_pairs: list[str], co
 
 
 def _restore_edge_costs(graph_service: Any, cost_expression: str) -> None:
+    """Restore temporary edge costs to the base preference-weighted expression."""
     execute_cypher_query(
         graph_service,
         f"MATCH ()-[r:CONNECTED_TO]->() SET r.temp_cost = {cost_expression}",
@@ -213,6 +218,7 @@ def _restore_edge_costs(graph_service: Any, cost_expression: str) -> None:
 
 
 def routing_node(state: dict) -> dict:
+    """Generate route candidates and return the best matching valid trail."""
     route_request = state.get("route_request") or {}
     route_type = route_request.get("route_type", "loop")
     target_km = route_request.get("distance_km")
@@ -221,9 +227,7 @@ def routing_node(state: dict) -> dict:
     if not nodes:
         return {"raw_route_data": None, "is_valid": False, "error_message": "Missing route position or network node."}
 
-    cost_expression = build_preference_cost_expression(
-        route_request.get("environmental_preferences") or {}, state.get("weather_report")
-    )
+    cost_expression = build_preference_cost_expression(route_request.get("environmental_preferences") or {})
     execute_cypher_query(
         graph_service,
         f"MATCH ()-[r:CONNECTED_TO]->() SET r.temp_cost = {cost_expression}",

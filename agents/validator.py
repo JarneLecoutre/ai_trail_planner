@@ -1,7 +1,11 @@
+"""Validation node for route integrity and map rendering."""
+
 from utils.map_generator import create_map_from_neo4j_output
 from pathlib import Path
 
+
 def validator_node(state: dict) -> dict:
+    """Validate route output and generate the HTML map artifact."""
     print("--- [Validator Node] Inspecting structural data integrity ---")
     raw_data = state.get("raw_route_data")
     
@@ -32,12 +36,14 @@ def validator_node(state: dict) -> dict:
     print("[Validator Node] Success: Integrity check passed.")
     return {"is_valid": True, "error_message": None}
 
+
 def evaluate_routing_condition(state: dict) -> str:
+    """Select the next graph edge based on validation outcome and retries."""
     if state["is_valid"]:
         return "route_accepted"
-    else:
-        if state["retry_count"] >= 3:
-            print("[GraphRouter] Aborting cycle execution: Maximum trial threshold reached.")
-            return "max_failures_abort"
-        print(f"[GraphRouter] Routing state invalid. Triggering self-correction loop execution step.")
-        return "trigger_recalculation"
+
+    if state["retry_count"] >= 3:
+        print("[GraphRouter] Aborting cycle execution: Maximum trial threshold reached.")
+        return "max_failures_abort"
+    print("[GraphRouter] Routing state invalid. Triggering self-correction loop execution step.")
+    return "trigger_recalculation"

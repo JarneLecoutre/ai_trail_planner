@@ -1,6 +1,4 @@
-# ---------------------------------------
-# MAP GENERATOR FUNCTIONS
-# ---------------------------------------
+"""Map rendering helpers for converting route payloads into Folium HTML maps."""
 
 import json
 import folium
@@ -8,6 +6,7 @@ from shapely.geometry import LineString
 
 
 def _extract_coordinates_from_node(node):
+    """Extract a (lat, lon) tuple from different node payload shapes."""
     if node is None:
         return None
 
@@ -40,6 +39,7 @@ def _extract_coordinates_from_node(node):
 
 
 def _extract_path_nodes(path_object):
+    """Extract node-like objects from known path object layouts."""
     if path_object is None:
         return []
 
@@ -66,6 +66,7 @@ def _extract_path_nodes(path_object):
 
 
 def _collect_coordinates_from_record(record):
+    """Collect unique coordinates from a generic Neo4j record object."""
     coordinates = []
     if isinstance(record, dict):
         for value in record.values():

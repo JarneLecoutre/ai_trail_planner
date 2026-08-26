@@ -1,12 +1,10 @@
-# --------------------
-# MAIN SCRIPT
-# --------------------
+"""CLI entrypoint for running the planner without the Streamlit UI."""
 
 import os
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-# Import specific classes and fucnctions
+# Import specific classes and functions.
 from services.neo4j_service import Neo4jService
 from agents.graph_builder import compiled_agent_graph
 
@@ -24,17 +22,18 @@ END_LAT = None
 END_LON = None
 
 def main():
+    """Run one full planner invocation from static configuration values."""
 
-    # Load Configuration
+    # Load configuration from .env.
     load_dotenv()
 
-    # Create output map if not exists
+    # Create output map directory if it does not exist.
     os.makedirs("output", exist_ok=True)
 
-    # Initialize Infrastructure Services
+    # Initialize infrastructure services.
     neo4j_service = None
 
-    # Initialize Large Language Model
+    # Initialize large language model.
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         project=os.getenv("GCP_PROJECT_ID"),
@@ -77,7 +76,7 @@ def main():
         print("="*50)
 
     finally:
-        # Guarantee driver cleanup upon exit or failure
+        # Guarantee driver cleanup upon exit or failure.
         if neo4j_service is not None and hasattr(neo4j_service, "close"):
             neo4j_service.close()
         elif neo4j_service is not None and hasattr(neo4j_service, "graph") and hasattr(neo4j_service.graph, "_driver"):

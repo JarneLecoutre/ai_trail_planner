@@ -1,4 +1,5 @@
-import json
+"""Intent parsing node and geocoding tools for converting user text into route intent."""
+
 import re
 from datetime import date
 from typing import Optional, List
@@ -8,6 +9,8 @@ import geocoder
 from pydantic import BaseModel, Field
 
 class EnvironmentalPreferences(BaseModel):
+    """Structured environment and accessibility preferences derived from user intent."""
+
     prefer_green: bool = Field(default=False, description="True if user wants general green/nature areas.")
     prefer_forest: bool = Field(default=False, description="True if user wants woods, forest, or tree-covered areas.")
     prefer_park: bool = Field(default=False, description="True if user explicitly wants public parks.")
@@ -32,6 +35,8 @@ class EnvironmentalPreferences(BaseModel):
     avoid_mud: bool = Field(default=False, description="True if the user wants to avoid muddy paths or mud.")
 
 class RouteIntent(BaseModel):
+    """Structured route request model returned by the intent parser."""
+
     route_type: str = Field(default="loop", description="'loop' or 'point_to_point'")
     distance_km: Optional[float] = Field(default=None, description="Target distance in kilometers, or null when the user does not specify one")
     start_location_name: Optional[str] = Field(default=None, description="Explicit start location text, address, or town name (e.g., 'Grobbendonk')")
@@ -45,12 +50,13 @@ class RouteIntent(BaseModel):
     notes: str = Field(default="", description="Extra specifications about the intent")
 
 def extract_json_block(text: str) -> str:
+    """Extract the first JSON object from arbitrary text output."""
     match = re.search(r"\{.*\}", text, re.S)
     return match.group(0) if match else text
 
 
 @tool
-def user_location_tool() -> list:
+def user_location_tool() -> Optional[list]:
     """
     Fetches the approximate latitude and longitude of the user based on their current IP location.
     Use this tool when the user says "my location", "current position", "here", or provides no start location.
@@ -59,8 +65,8 @@ def user_location_tool() -> list:
         g = geocoder.ip('me')
         if g.latlng:
             return g.latlng
-    except Exception as e:
-        print(f"[Location Tool] IP Geolocation failed: {e}")
+    except Exception as error:
+        print(f"[Location Tool] IP Geolocation failed: {error}")
     
     return None
 
@@ -90,8 +96,8 @@ def resolve_location_tool(location_description: str) -> Optional[list]:
         location = geolocator.geocode(loc_clean, timeout=5)
         if location:
             return [location.latitude, location.longitude]
-    except Exception as e:
-        print(f"[Location Tool] Geocoding error for '{loc_clean}': {e}")
+    except Exception as error:
+        print(f"[Location Tool] Geocoding error for '{loc_clean}': {error}")
     return None
 
 
@@ -112,7 +118,6 @@ def intent_parser_node(state: dict) -> dict:
             "Generate a 5 km loop hike in nature starting from my current position"
         )
 
-    tools = [resolve_location_tool, user_location_tool]
     llm_structured = llm.with_structured_output(RouteIntent)
 
     parsed_intent = None
@@ -130,37 +135,37 @@ def intent_parser_node(state: dict) -> dict:
             Extract hike_date as YYYY-MM-DD when the request says today, tomorrow, a weekday, or gives a date.
              Resolve relative dates using today's date: {date.today().isoformat()}.
             Return hike_date=null when no hiking day is mentioned.
-     2. Extract clean, concise place/city/street names for 'start_location_name', 'end_location_name', and
-         'via_location_name' suitable for geocoding.
-       - Example: "city centre of Nijlen" -> "Nijlen"
-       - Example: "my home in Grobbendonk (Tulpstraat 12)" -> "Tulpstraat 12, Grobbendonk"
-         - Set via_location_name only when the user explicitly says the route must pass through, visit,
-            or include a location. It can be a city, landmark, address, or coordinate pair.
-                3. Reason carefully about every environmental preference. Set a field to true only when the request
-                     expresses that preference, requirement, or avoidance; otherwise leave it false.
-                     - Green: prefer_green is for a general request for nature or green surroundings. Use prefer_forest,
-                         prefer_park, prefer_nature_reserve, or prefer_open_green only when that specific setting is requested.
-                         Set avoid_green, avoid_forest, avoid_park, avoid_nature_reserve, or avoid_open_green when the user
-                         explicitly wants to stay away from the corresponding setting.
-                     - Surfaces: prefer_unpaved is for dirt, gravel, trails, or natural surfaces. prefer_paved is for paved,
-                         firm, smooth, or tarmac paths. avoid_unpaved is for an explicit request to avoid loose, rough,
-                         gravel, dirt, or unpaved surfaces.
-                     - Mud: set avoid_mud when the user mentions mud, muddy paths, dirty shoes, or keeping shoes clean.
-                         Do not infer avoid_unpaved or prefer_paved from avoid_mud; the weather agent decides that later.
-                     - Path type: set prefer_footway_only when the user wants footpaths only. Set avoid_footways when they
-                         explicitly want to avoid footways, paths, tracks, or pedestrian paths.
-                     - Lighting: require_lit is for illuminated routes or walking at night. avoid_lit is only for an explicit
-                         request to avoid illuminated paths.
-                     - Accessibility: wheelchair, mobility scooter, pram, reduced mobility, or an explicit accessibility
-                         requirement means require_wheelchair_accessible=true, prefer_easy=true, avoid_unpaved=true,
-                         avoid_stairs=true, avoid_steep=true, prefer_unpaved=false, and prefer_paved=true.
-                         Set prefer_easy for an easy, smooth, low-effort, or flat route. Set avoid_stairs and avoid_steep only
-                         when stairs or steep terrain must be avoided.
-                  4. Resolve conflicts deliberately. Explicit avoidance overrides a matching preference. In particular,
-                      avoid_green=true means prefer_green, prefer_forest, prefer_park, prefer_nature_reserve, and
-                      prefer_open_green must all be false. Likewise, avoiding a specific green category means its matching
-                      preference must be false. Accessibility requirements override any request for unpaved, stairs, or
-                      steep terrain. Do not invent preferences.
+    2. Extract clean, concise place/city/street names for 'start_location_name', 'end_location_name', and
+        'via_location_name' suitable for geocoding.
+        - Example: "city centre of Nijlen" -> "Nijlen"
+        - Example: "my home in Grobbendonk (Tulpstraat 12)" -> "Tulpstraat 12, Grobbendonk"
+        - Set via_location_name only when the user explicitly says the route must pass through, visit,
+        or include a location. It can be a city, landmark, address, or coordinate pair.
+    3. Reason carefully about every environmental preference. Set a field to true only when the request
+            expresses that preference, requirement, or avoidance; otherwise leave it false.
+            - Green: prefer_green is for a general request for nature or green surroundings. Use prefer_forest,
+                prefer_park, prefer_nature_reserve, or prefer_open_green only when that specific setting is requested.
+                Set avoid_green, avoid_forest, avoid_park, avoid_nature_reserve, or avoid_open_green when the user
+                explicitly wants to stay away from the corresponding setting.
+            - Surfaces: prefer_unpaved is for dirt, gravel, trails, or natural surfaces. prefer_paved is for paved,
+                firm, smooth, or tarmac paths. avoid_unpaved is for an explicit request to avoid loose, rough,
+                gravel, dirt, or unpaved surfaces.
+            - Mud: set avoid_mud when the user mentions mud, muddy paths, dirty shoes, or keeping shoes clean.
+                Do not infer avoid_unpaved or prefer_paved from avoid_mud; the weather agent decides that later.
+            - Path type: set prefer_footway_only when the user wants footpaths only. Set avoid_footways when they
+                explicitly want to avoid footways, paths, tracks, or pedestrian paths.
+            - Lighting: require_lit is for illuminated routes or walking at night. avoid_lit is only for an explicit
+                request to avoid illuminated paths.
+            - Accessibility: wheelchair, mobility scooter, pram, reduced mobility, or an explicit accessibility
+                requirement means require_wheelchair_accessible=true, prefer_easy=true, avoid_unpaved=true,
+                avoid_stairs=true, avoid_steep=true, prefer_unpaved=false, and prefer_paved=true.
+                Set prefer_easy for an easy, smooth, low-effort, or flat route. Set avoid_stairs and avoid_steep only
+                when stairs or steep terrain must be avoided.
+    4. Resolve conflicts deliberately. Explicit avoidance overrides a matching preference. In particular,
+        avoid_green=true means prefer_green, prefer_forest, prefer_park, prefer_nature_reserve, and
+        prefer_open_green must all be false. Likewise, avoiding a specific green category means its matching
+        preference must be false. Accessibility requirements override any request for unpaved, stairs, or
+        steep terrain. Do not invent preferences.
     """
 
     try:

@@ -1,3 +1,5 @@
+"""LangGraph workflow wiring for the AI trail planner."""
+
 from typing import TypedDict, List, Optional, Any
 from langgraph.graph import StateGraph, END
 
@@ -8,6 +10,8 @@ from agents.validator import validator_node, evaluate_routing_condition
 from agents.weather import weather_node
 
 class SearchState(TypedDict):
+    """State object passed between all agent nodes."""
+
     user_request: str
     map_output_name: str
     map_output_path: Optional[str]
@@ -46,6 +50,7 @@ workflow.add_edge("weather", "orchestrator")
 workflow.add_edge("router", "validator")
 
 def should_exit_after_orchestrator(state: dict) -> str:
+    """End the flow once a final summary has been produced."""
     if state.get("final_narrative"):
         return "end_summary"
     return "continue_loop"

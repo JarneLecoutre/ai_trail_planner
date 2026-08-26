@@ -1,6 +1,4 @@
-# -----------------------------------------------
-# GPX FILE GENERATOR FROM ROUTE COORDINATES
-# -----------------------------------------------
+"""GPX generation helpers for exporting computed routes."""
 
 import json
 from datetime import datetime
@@ -49,8 +47,6 @@ def generate_gpx(
 
 def extract_coordinates_for_gpx(neo4j_data: List[dict]) -> List[tuple]:
     """Extract coordinates from the route data structure (same as map generator)."""
-    import json
-
     if not neo4j_data or not isinstance(neo4j_data, list):
         return []
 

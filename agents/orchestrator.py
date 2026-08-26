@@ -1,3 +1,5 @@
+"""Orchestrator node that computes thresholds and drafts the final user narrative."""
+
 from typing import Any
 
 
@@ -7,10 +9,12 @@ GREEN_HIGHWAYS = {"path", "track", "bridleway"}
 
 
 def _is_yes(value: Any) -> bool:
+    """Return True for boolean-like yes/true values used in graph properties."""
     return value is True or str(value).lower() in {"yes", "true"}
 
 
 def _route_surface_totals(raw_route: list) -> dict[str, float]:
+    """Aggregate paved/unpaved/green distances in kilometers from edge metadata."""
     edges = raw_route[0].get("edge_details", []) if raw_route else []
     totals = {"paved": 0.0, "unpaved": 0.0, "green": 0.0}
 
@@ -38,6 +42,7 @@ def _route_surface_totals(raw_route: list) -> dict[str, float]:
 
 
 def orchestrator_node(state: dict) -> dict:
+    """Either build constraints for routing retries or produce the final narrative."""
     if state.get("is_valid"):
         print("[Orchestrator Node] Route structure passed validation. Compiling user summary...")
         llm = state["_llm"]
@@ -78,7 +83,7 @@ def orchestrator_node(state: dict) -> dict:
     print("[Orchestrator Node] Calculating mathematical GIS thresholds...")
     route_request = state.get("route_request") or {}
     
-    # Safe fallback lookup using .get() for distance_km
+    # Safe fallback lookup for distance_km.
     effective_distance = route_request.get("distance_km") or state.get("distance_km") or 5.0
     target_dist = float(effective_distance) * 1000.0
     multiplier = 1.0 + (state.get("retry_count", 0) * 0.15)
