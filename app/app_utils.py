@@ -1,3 +1,5 @@
+"""Utility helpers shared by the Streamlit app."""
+
 import os
 import agents.routing as routing_module
 from pathlib import Path
@@ -13,7 +15,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "output"
 
 
+def _close_neo4j_service(service) -> None:
+    """Close Neo4j connections for both service implementations used in this project."""
+    if service is None:
+        return
+    if hasattr(service, "close"):
+        service.close()
+    elif hasattr(service, "graph") and hasattr(service.graph, "_driver"):
+        service.graph._driver.close()
+
+
 def run_planner(request, coordinates, map_name):
+    """Run one planner execution and return the final graph state."""
     load_dotenv(PROJECT_ROOT / ".env")
     print(f"[Planner] Loaded routing module from: {routing_module.__file__}")
     service = None
@@ -47,12 +60,9 @@ def run_planner(request, coordinates, map_name):
         }
         return compiled_agent_graph.invoke(state)
     finally:
-        if service is not None:
-            if hasattr(service, "close"):
-                service.close()
-            elif hasattr(service, "graph") and hasattr(service.graph, "_driver"):
-                service.graph._driver.close()
+        _close_neo4j_service(service)
 
 
 def map_path(map_name):
+    """Return the absolute path of a generated map inside the output folder."""
     return OUTPUT_DIR / map_name

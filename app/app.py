@@ -1,3 +1,5 @@
+"""Streamlit UI for the AI Trail Planner."""
+
 import sys
 import time
 import uuid
@@ -13,6 +15,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from app.app_utils import OUTPUT_DIR, map_path, run_planner
+from utils.gpx_generator import extract_coordinates_for_gpx, generate_gpx
 
 
 _executor = ThreadPoolExecutor(max_workers=2)
@@ -36,6 +39,8 @@ st.markdown(
         --clay: #c77d55;
         --paper: #f6f4ee;
         --line: #dce2d8;
+        --sun: #e8ad45;
+        --sky: #e5f0ef;
     }
     .stApp {
         background: var(--paper);
@@ -53,7 +58,7 @@ st.markdown(
     }
     [data-testid='stHeader'] { background: transparent; }
     [data-testid='stAppViewContainer'] { background: transparent; }
-    .block-container { max-width: 1180px; padding-top: 3.5rem; padding-bottom: 4rem; }
+    .block-container { max-width: 1220px; padding-top: 2.4rem; padding-bottom: 4rem; }
     .eyebrow {
         color: var(--clay); font-size: .74rem; font-weight: 700;
         letter-spacing: .12em; text-transform: uppercase; margin-bottom: .65rem;
@@ -61,10 +66,15 @@ st.markdown(
     .hero-title {
         color: var(--moss-dark); font-family: 'Newsreader', Georgia, serif;
         font-size: clamp(2.7rem, 5vw, 5.4rem); line-height: .95;
-        margin: 0; max-width: 680px;
+        margin: 0; max-width: 760px;
     }
-    .hero-copy { color: var(--muted); font-size: 1.05rem; line-height: 1.6; max-width: 560px; margin-top: 1rem; }
-    .prompt-label { color: var(--ink); font-size: .86rem; font-weight: 700; margin: 2.4rem 0 .35rem; }
+    .hero-copy { color: var(--muted); font-size: 1.05rem; line-height: 1.6; max-width: 620px; margin-top: 1rem; }
+    .prompt-label { color: var(--ink); font-size: .86rem; font-weight: 700; margin: 2rem 0 .35rem; }
+    .section-kicker { color: var(--clay); font-size: .72rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; margin-bottom: .35rem; }
+    .weather-strip { background: var(--sky); border-left: 4px solid var(--sun); padding: 1rem 1.2rem; margin: 1.2rem 0; }
+    .weather-strip strong { color: var(--moss-dark); }
+    .advice-list { background: rgba(255,255,255,.68); border: 1px solid var(--line); padding: 1rem 1.2rem; }
+    .advice-item { color: var(--ink); line-height: 1.45; margin: .55rem 0; }
     div[data-testid='stTextArea'] textarea {
         background: rgba(255,255,255,.78); border: 1px solid var(--line);
         border-radius: 10px; color: var(--ink); font-size: 1rem; line-height: 1.55;
@@ -78,6 +88,7 @@ st.markdown(
     }
     div.stButton > button:hover { background: var(--moss-dark); transform: translateY(-1px); }
     .result-heading { border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1.5rem; }
+    div[data-testid='stMetric'] { background: rgba(255,255,255,.6); border: 1px solid var(--line); padding: .8rem; }
     h2, h3 { color: var(--moss-dark); font-family: 'Newsreader', Georgia, serif; }
     [data-testid='stAlert'] { border-radius: 7px; }
     @media (max-width: 700px) {
@@ -98,11 +109,15 @@ st.markdown(
 
 
 def show_map(path):
+    """Render a generated HTML map file inside the Streamlit page."""
     if not path.exists():
         st.warning("The route was accepted, but the map file was not found.")
         return
     components.html(path.read_text(encoding="utf-8"), height=650, scrolling=False)
 
+
+future: Future | None = st.session_state.get("planner_future")
+is_planning = future is not None and not future.done()
 
 prompt_column, _ = st.columns([1.35, .65])
 with prompt_column:
@@ -115,13 +130,16 @@ with prompt_column:
             "Create a 10 km loop from Grobbendonk through open green spaces."
         ),
     )
-    plan_clicked = st.button("Plan my trail", type="primary")
+    plan_clicked = st.button("Plan my trail", type="primary", disabled=is_planning)
 
 if plan_clicked:
     request = user_request.strip()
     if not request:
         st.warning("Please describe the trail you want before planning it.")
         st.stop()
+
+    for key in ("planner_future", "planner_request", "planner_map_name", "planner_result", "planner_error"):
+        st.session_state.pop(key, None)
 
     map_name = f"streamlit_trail_{uuid.uuid4().hex}.html"
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -138,37 +156,75 @@ if plan_clicked:
     )
     st.session_state["planner_request"] = request
     st.session_state["planner_map_name"] = map_name
-    st.session_state.pop("planner_result", None)
-    st.session_state.pop("planner_error", None)
-
-future: Future | None = st.session_state.get("planner_future")
-if future is not None and not future.done():
-    st.info("The trail planner is working in the background. This page will update when it is finished.")
-    time.sleep(0.5)
     st.rerun()
 
-if future is not None and future.done() and "planner_result" not in st.session_state and "planner_error" not in st.session_state:
+if future is not None and not future.done():
+    with st.spinner("Planning your trail..."):
+        time.sleep(0.5)
+        st.rerun()
+
+if future is not None and future.done():
     try:
         st.session_state["planner_result"] = future.result()
+        st.session_state.pop("planner_error", None)
     except Exception as error:
+        st.session_state.pop("planner_result", None)
         st.session_state["planner_error"] = str(error)
+    st.session_state.pop("planner_future", None)
+    st.rerun()
 
-if st.session_state.get("planner_error"):
-    st.error("The trail planner could not complete: " + st.session_state["planner_error"])
+if not is_planning and st.session_state.get("planner_error"):
+    print("[Planner] The trail planner could not complete: " + st.session_state["planner_error"])
 
 result = st.session_state.get("planner_result")
 if result:
     route_request = result.get("route_request") or {}
     st.markdown('<div class="result-heading"></div>', unsafe_allow_html=True)
-    st.success("Trail created.")
-    left, right = st.columns([2, 1])
+    st.success("Trail created and ready to explore.")
+    weather = result.get("weather_report") or {}
+    raw_route = result.get("raw_route_data") or [{}]
+    actual_km = (raw_route[0].get("totalDistance", 0) or 0) / 1000
+    st.markdown('<div class="section-kicker">Your trail brief</div>', unsafe_allow_html=True)
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Route", route_request.get("route_type", "loop").replace("_", " ").title())
+    metric_columns[1].metric("Distance", f"{actual_km:.1f} km")
+    metric_columns[2].metric("Forecast", str(weather.get("date", "Unavailable")))
+    metric_columns[3].metric("High", f"{weather.get('temperature_max_c', '--')} C")
+    if weather:
+        st.markdown(
+            f'<div class="weather-strip"><strong>Trail conditions</strong><br>'
+            f'Rain: {weather.get("rain_mm", 0)} mm · Chance: {weather.get("precipitation_probability", "--")}% · '
+            f'Wind: {weather.get("wind_speed_max_kmh", "--")} km/h</div>',
+            unsafe_allow_html=True,
+        )
+        if weather.get("route_guidance"):
+            st.info(weather["route_guidance"])
+    left, right = st.columns([1.7, 1])
     with left:
         show_map(map_path(st.session_state["planner_map_name"]))
     with right:
-        st.subheader("Planner summary")
+        st.markdown('<div class="section-kicker">Trail notes</div>', unsafe_allow_html=True)
         if result.get("final_narrative"):
             st.write(result["final_narrative"])
-        st.subheader("What it understood")
-        st.json(route_request)
-        st.caption("Request sent to the planner")
-        st.write(st.session_state.get("planner_request", ""))
+        route_coordinates = extract_coordinates_for_gpx(raw_route)
+        if len(route_coordinates) >= 2:
+            gpx_data = generate_gpx(
+                route_coordinates,
+                route_name="AI Trail Planner Route",
+                route_description=st.session_state.get("planner_request", ""),
+                distance_km=actual_km,
+            )
+            st.download_button(
+                "Download GPX",
+                data=gpx_data,
+                file_name="ai-trail-planner-route.gpx",
+                mime="application/gpx+xml",
+            )
+        else:
+            st.warning("GPX download is unavailable because the route has too few coordinates.")
+        st.markdown('<div class="section-kicker">What to wear</div>', unsafe_allow_html=True)
+        advice = weather.get("clothing_advice")
+        if advice:
+            st.markdown('<div class="advice-list">' + ''.join(f'<div class="advice-item">• {item}</div>' for item in advice) + '</div>', unsafe_allow_html=True)
+        with st.expander("Show route details"):
+            st.json(route_request)

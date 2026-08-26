@@ -1,3 +1,5 @@
+"""LangGraph workflow wiring for the AI trail planner."""
+
 from typing import TypedDict, List, Optional, Any
 from langgraph.graph import StateGraph, END
 
@@ -5,8 +7,11 @@ from agents.intent_parser import intent_parser_node
 from agents.orchestrator import orchestrator_node
 from agents.routing import routing_node
 from agents.validator import validator_node, evaluate_routing_condition
+from agents.weather import weather_node
 
 class SearchState(TypedDict):
+    """State object passed between all agent nodes."""
+
     user_request: str
     map_output_name: str
     map_output_path: Optional[str]
@@ -17,6 +22,7 @@ class SearchState(TypedDict):
     end_lon: Optional[float]
     start_node_id: Optional[str]
     end_node_id: Optional[str]
+    via_node_id: Optional[str]
     route_request: Optional[dict]
     generated_cypher: Optional[str]
     constraints: dict 
@@ -25,21 +31,26 @@ class SearchState(TypedDict):
     error_message: Optional[str]
     retry_count: int
     final_narrative: Optional[str]
+    weather_report: Optional[dict]
+    weather_error: Optional[str]
     _llm: Any 
     _graph_service: Any
 
 workflow = StateGraph(SearchState)
 
 workflow.add_node("intent", intent_parser_node)
+workflow.add_node("weather", weather_node)
 workflow.add_node("orchestrator", orchestrator_node)
 workflow.add_node("router", routing_node)
 workflow.add_node("validator", validator_node)
 
 workflow.set_entry_point("intent")
-workflow.add_edge("intent", "orchestrator")
+workflow.add_edge("intent", "weather")
+workflow.add_edge("weather", "orchestrator")
 workflow.add_edge("router", "validator")
 
 def should_exit_after_orchestrator(state: dict) -> str:
+    """End the flow once a final summary has been produced."""
     if state.get("final_narrative"):
         return "end_summary"
     return "continue_loop"

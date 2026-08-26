@@ -1,6 +1,4 @@
-# ----------------------------------------------------------
-# NEO4J DATABASE CONNECTIONS AND CYPHER QUERY FUNCTIONS
-# ----------------------------------------------------------
+"""Neo4j service wrapper with connection retries and helper queries."""
 
 import time
 
@@ -8,6 +6,8 @@ from neo4j.exceptions import ClientError, ServiceUnavailable, SessionExpired
 from langchain_neo4j import Neo4jGraph
 
 class Neo4jService:
+    """Service object used by agent nodes to interact with Neo4j."""
+
     def __init__(self, uri, username, password, database=None, retries=3):
         if not uri or not username or not password:
             raise ValueError(
@@ -79,9 +79,17 @@ class Neo4jService:
         )
 
         if result:
-            closest_dist = round(result[0]["dist"], 2)
-            print(f"Success: Closest OSMNode found at {closest_dist} meters from current location.")
-            return result[0]["nodeId"]
+            closest_node = result[0]
+            node_id = closest_node.get("nodeId")
+            if node_id:
+                closest_dist = round(closest_node.get("dist", 0), 2)
+                print(f"Success: Closest OSMNode found at {closest_dist} meters from current location.")
+                return node_id
 
         print("Warning: No close OSMNode found matching the criteria.")
-        return None     
+        return None
+
+    def close(self) -> None:
+        """Close the underlying Neo4j driver if available."""
+        if hasattr(self, "graph") and hasattr(self.graph, "_driver"):
+            self.graph._driver.close()
